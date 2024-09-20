@@ -1,0 +1,450 @@
+---
+title: "Prediction of Life Expectancy using Regression"
+author: "David"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+The main objective of this analysis is to build a Regression model that can accurately predict Life Expectancy for any country in Africa. I'm mainly focusing on Africa because Africa has the highest number of least developed countries. These are low-income countries which are highly vulnerable to economic shocks and have low levels of human assets (UN, 2023). These countries are mainly characterized by slow economic growth and high population growth, which has led to the rising number of people living in extreme poverty.
+
+```{r, include=FALSE}
+# set working directory
+setwd("C:/Users/DAVID/R Programming/Projects/Regression")
+```
+
+```{r}
+# Load packages
+suppressMessages(
+  {library(tidyverse)
+    library(caret)
+    library(janitor)
+    library(mlr)
+    library(psych)
+    library(parallel)
+    library(parallelMap)
+  }
+)
+```
+
+```{r}
+# Import data
+Life_Expectancy <- read.csv("Life_Expectancy.csv")
+```
+
+```{r}
+# View the structure of the dataset
+Life_Expectancy |> glimpse()
+```
+
+The data has 1904 observations of 17 variables. Country and Continent are character variables, least developed is a logical variable while the rest of the variables are numeric.
+
+# Clean the data
+
+```{r}
+# Clean variable names
+Life_Expectancy <- clean_names(Life_Expectancy)
+```
+```{r}
+# Rename variables with longer variable names to have shorter names
+Life_Expectancy <- Life_Expectancy |> rename(open_defecation = "people_practicing_open_defecation",
+                          basic_drinking_water = "people_using_at_least_basic_drinking_water_services",
+                          adults_obesity = "obesity_among_adults",
+                          beer_consumption = "beer_consumption_per_capita",
+                          internet = "individuals_using_the_internet")
+```
+
+```{r}
+# Check for missing values
+map_dbl(Life_Expectancy, ~length(which(is.na(.))))
+```
+
+There are no missing values in the data.
+
+```{r}
+# Check for duplicated observations
+sum(duplicated(Life_Expectancy))
+```
+
+There are no duplicated observations in the data as well.
+
+# Exploratory Data Analysis
+
+I'm more interested in Africa, so I will filter the data for Africa. I'd like to obtain the average Life Expectancy in Africa between the period 2000 to 2015, average GDP per Capita, Health Expenditure, the population with access to clean water services and the population which is still practicing open defecation.
+
+```{r}
+# Filter the data for Africa
+Africa_Data <- Life_Expectancy |> filter( continent == "Africa")
+```
+
+The data for Africa has 448 observations.
+
+```{r}
+# Calculate summary statistics
+Africa_Data |> select(-c(country, continent)) |> summary()
+```
+
+* The average Life Expectancy in Africa between 2000 to 2015 was 59.72 years. The average population was 28,169,437.
+* The average GDP Per Capita for Africa (the average income per person) between 2000 to 2015 was about $5826.6, the average Health Expenditure was 4.796% of GDP, while the average military expenditure was 2.88% of GDP.
+* On average, 65.63% of the population have access to basic drinking water services, but 25.67% of the population still practice open defecation. This is still a major challenge for Africa.
+* Also on average, 8.6% of the population have access to internet connection, and 9.58% of the population are obese.
+
+```{r, warning=FALSE}
+# Convert the data to long format for plotting
+UntidyData <- gather(Africa_Data, key = "Variable", value = "Value", 
+                     -c(country, continent, life_expectancy))
+
+# Plot
+ggplot(UntidyData, aes(Value, life_expectancy)) + 
+  facet_wrap(~Variable, scale = "free_x")+ 
+  geom_point() + 
+  geom_smooth() + 
+  geom_smooth(method = "lm", col ="red") + 
+  theme_minimal()
+```
+
+Most of the predictor variables have non-linear relationship with the outcome variable.
+Health expenditure and military expenditure don't seem to have a relationship with Life Expectancy.
+
+# Model training
+
+```{r}
+# Select the variables to be used for model training (omit country & continent)
+data <- Africa_Data |> select(-c(country, continent))
+```
+
+```{r}
+## Partition the data into training and test sets
+
+# Set seed for reproducibility
+set.seed(42)
+# Partition the data
+splitIndex <- createDataPartition(data$life_expectancy, p = 0.80, list = FALSE)
+# Assign 80% to training set
+training_data <- data[splitIndex, ]
+# Assign test set the remaining 20%
+test_data <- data[-splitIndex, ]
+```
+
+```{r}
+# Convert all the features in training data to numeric
+training_data <- mutate_all(training_data, .funs = ~ as.numeric(.))
+# Convert all the features in test data to numeric
+test_data <- mutate_all(test_data, .funs = ~ as.numeric(.))
+```
+
+## Linear Regression model
+
+```{r}
+# Define regression task
+reg_task <- makeRegrTask(data = training_data, target = "life_expectancy")
+# Define learner
+reg_learner <- makeLearner("regr.lm")
+```
+
+```{r}
+# Estimate variable importance using linear correlation
+filterVals <- generateFilterValuesData( reg_task, method = "linear.correlation")
+
+# Get the correlation coefficients
+filterVals$data
+```
+
+Most of the predictors are moderately correlated with the outcome variable. Population, Health Expenditure, Military Expenditure and beer consumption are weakly correlated with life expectancy. None of the predictors is highly correlated with the outcome variable.
+
+```{r}
+# Plot the feature importance
+plotFilterValues(filterVals) + theme_bw() + coord_flip()
+```
+
+Despite Health Expenditure being a very important determinant of life expectancy, it contributes very little information to the outcome variable. This means that Health is underfunded in Africa and this remains a major concern. Adults obesity, basic drinking water services, access to internet and GDP per Capita, respectively, contribute the highest information to the outcome variable. Open defecation, CO2 emissions and forest area cover contribute nearly the same amount of information to the outcome variable.
+
+From my EDA, most of the predictor variables didn't have a linear relationship with the outcome Life Expectancy, but I'll use all the variables for modelling because they might be of importance to non-linear models.
+
+```{r}
+# Fit the Linear Regression model
+Linear_model <- train(reg_learner, reg_task)
+# Obtain model results
+results <- getLearnerModel(Linear_model)
+```
+
+```{r}
+# Have a model summary
+summary(results)
+```
+
+The overall model is significant (p-value < 0.01). The adjusted R-squared is also high (0.81), implying that the predictors explain most of the variance in the dependent/outcome variable (Life Expectancy). Year, CO2 emissions and Beer consumption are insignificant predictors of Life Expectancy. 
+
+* The intercept is not meaningful in this case.
+* On average, life expectancy in countries that aren't least developed is expected to be 6.99 years higher, as compared to life expectancy in countries that are least developed, keeping all other variables constant.
+* For every individual increase in population, life expectancy is expected to decrease by
+(3.582 ^ (10*-8)), keeping all other variables constant.
+* For every unit increase in CO2 emissions, life expectancy is expected to decrease by
+0.2153 years, keeping all other variables constant. Even though this isn't significant.
+* For every 1% increase in health expenditure as a percentage of GDP, life expectancy is expected to decrease by 0.66 years, keeping all other variables constant. This is very opposite with the obvious expectation that increasing health expenditure would increase life expectancy.
+* For every unit increase in electric power consumption, life expectancy is expected to decrease by 0.0027 years, keeping all other variables constant.
+* For every square unit increase in forest area, life expectancy is expected to decrease by 0.174 years, keeping all other variables constant. This is also opposite with my expectation that, an increase in forest area would improve life expectancy due to cleaner air, biodiversity, and general health benefits linked to green spaces.
+* For every one dollar increase in GDP per ca-pita, life expectancy is expected to increase by 0.000397 years, keeping all other variables constant.
+* For every 1% increase in population with access to the internet, life expectancy is expected to increase by 0.16 years, keeping all other variables constant.
+* For every 1% increase in military expenditure as a percentage of GDP, life expectancy is expected to increase by 0.14 years, keeping all other variables constant. This matches the expectation that increasing military expenditure would increase the safety levels of a country, mainly from external attacks like terrorism.
+* For every 1% increase in population practicing open defecation, life expectancy is expected to decrease by 0.144 years, keeping all other variables constant.
+* For every 1% increase in population with access to basic drinking water services, life expectancy is expected to increase by 0.102 years, keeping all other variables constant.
+* For every 1% increase in adult population with obesity, life expectancy is expected to increase by 0.31 years, keeping all other variables constant. This is also opposite with what I expected.
+
+
+## Linear Model Diagnostics
+
+```{r}
+# Plot the model results
+par(mfrow = c(2, 2))
+plot(results)
+```
+
+* There are no patterns in the residuals vs fitted plot, implying that there's a linear relationship between the dependent and the predictor variables.
+* The normal Q-Q plot closely resembles a straight line along the diagonal, with little discrepancies on the tails. This implies that the residuals are normally distributed.
+* There's no pattern in the Scale-Location plot, implying that there's no heteroscedasticity of the residuals.
+
+Nearly all the assumptions for the Linear model are met.
+
+```{r}
+# Cross-validate the linear model to see how it generalizes
+
+# Wrap learner with feature preprocessing
+lm_scaled <- makePreprocWrapperCaret(learner = reg_learner, ppc.scale = TRUE, 
+                                     ppc.center = TRUE)
+
+# Make resampling description
+kFold <-makeResampleDesc(method = "RepCV", folds = 7, reps = 30)
+
+# Cross-validate
+lmCV <-resample(lm_scaled, reg_task, resampling = kFold, 
+                measures = list(rmse, rsq), 
+                show.info = FALSE)
+
+# View CV results
+lmCV
+```
+
+An RMSE value of 3.63 is a bit high, the model doesn't perform very well.
+
+# Non-linear Regression Models
+
+## KNN
+
+```{r}
+# Define KNN Learner
+kknn <- makeLearner("regr.kknn")
+
+# Wrap learner with feature preprocessing
+kknn_normalized <- makePreprocWrapperCaret(learner = kknn, 
+                                           ppc.scale = TRUE, 
+                                           ppc.center = TRUE)
+```
+
+```{r}
+# Define hyperparameter space for tuning k
+kknnParamSpace <- makeParamSet(makeDiscreteParam("k", values = 1:12))
+# Specify search strategy
+gridSearch <- makeTuneControlGrid()
+# Tune the model
+tunedK <- tuneParams(kknn_normalized, task = reg_task, 
+                     resampling = kFold, 
+                     par.set = kknnParamSpace, 
+                     control = gridSearch, 
+                     measures = list(rmse, rsq), 
+                     show.info = FALSE)
+
+# View tuning results
+tunedK
+```
+
+The optimal value of k is 2. RMSE is lower compared to that of the Linear model. R-squared is also closer to 1, which is good. It is however important to note that KNN can overfit at lower values of k.
+
+```{r}
+# Extract model information
+knnTuningData <- generateHyperParsEffectData(tunedK)
+# Visualize the hyperparameter tuning process
+plotHyperParsEffect(knnTuningData, x = "k", y = "rmse.test.rmse", 
+                    plot.type = "line") + theme_bw()
+```
+
+RMSE is lowest at k = 2.
+
+```{r}
+# Set the optimal value of k for the final model
+tunedKnn <- setHyperPars(kknn, par.vals = tunedK$x)
+# Train the final model
+tunedKnnModel <- train(tunedKnn, reg_task)
+```
+
+
+## Random Forest
+
+```{r}
+# Define learner
+rf_learner <- makeLearner("regr.randomForest")
+```
+
+```{r}
+# Define hyperparameter space for tuning the model
+forestParamSpace <- makeParamSet(
+ makeIntegerParam("ntree", lower = 100, upper = 100),
+ makeIntegerParam("mtry", lower = 4, upper = 25),
+ makeIntegerParam("nodesize", lower = 1, upper = 30),
+ makeIntegerParam("maxnodes", lower = 5, upper = 25))
+
+# Make resampling description
+kFold <- makeResampleDesc(method = "RepCV", folds = 7, reps = 20)
+
+# Specify search strategy
+randSearch <- makeTuneControlRandom(maxit = 50)
+
+# Begin parallelization (Parallel processing speeds up the hyperparameter tuning process)
+parallelStartSocket(cpus = detectCores())
+
+# Perform hyperparameter tuning with cross-validation
+tunedForestPars <- tuneParams(rf_learner, task = reg_task, resampling = kFold, 
+                              par.set = forestParamSpace, control = randSearch, 
+                              measures = list(rmse, rsq), 
+                              show.info = FALSE)
+
+# Stop parallelization
+parallelStop()
+
+# View tuning results
+tunedForestPars
+```
+
+The RF model outperforms the Linear model but is outperformed by KNN. It has a lower RMSE value of 1.91, even though not very closer to zero.
+
+```{r}
+# Set the optimal hyperparameters for the final model
+tunedForest <- setHyperPars(rf_learner, par.vals = tunedForestPars$x)
+
+# Train the final model using the optimal hyperparameters
+tunedForestModel <- train(tunedForest, reg_task)
+
+# Extract model information
+forestModelData <- getLearnerModel(tunedForestModel)
+
+# Check if there are enough trees in the forest
+plot(forestModelData)
+```
+
+The out-of-bag error stabilizes after about 75 bagged trees, implying that I have enough trees in the forest.
+
+# XGBoost
+
+```{r}
+# Define learner
+xgb <-makeLearner("regr.xgboost")
+```
+
+```{r}
+# Define hyperparameter space for tuning
+xgbParamSpace <-makeParamSet(
+  makeNumericParam("eta", lower = 0, upper = 1),
+  makeNumericParam("gamma", lower = 0, upper = 5),
+  makeIntegerParam("max_depth", lower = 1, upper = 20),
+  makeNumericParam("min_child_weight", lower = 1, upper = 10),
+  makeNumericParam("subsample", lower = 0.5, upper = 1),
+  makeNumericParam("colsample_bytree", lower = 0.5, upper = 1),
+  makeIntegerParam("nrounds", lower = 50, upper = 50))
+
+# Perform hyperparameter tuning with cross-validation
+tunedXgbPars <- tuneParams(xgb, task = reg_task,resampling = kFold, 
+                           par.set = xgbParamSpace, control = randSearch, 
+                           measures = list(rmse, rsq), 
+                           show.info = FALSE)
+
+# View tuning results
+tunedXgbPars
+```
+
+An RMSE value of 1.31 is low and is good (even though not very closer to zero). The XGBoost algorithm outperforms Random Forest and the Linear Regression, but is outperformed by KNN.
+
+```{r}
+# Set the optimal hyperparameters for the final model
+tunedXgb <- setHyperPars(xgb, par.vals = tunedXgbPars$x)
+
+# Train the final model using optimal hyperparameters
+tunedXgbModel <- train(tunedXgb, reg_task)
+
+# Extract model information
+xgbModelData <- getLearnerModel(tunedXgbModel)
+
+# Plot the model data to check if there are enough trees in the ensemble
+ggplot(xgbModelData$evaluation_log, aes(iter, train_rmse)) + 
+  geom_line() + geom_point() + theme_bw()
+```
+
+The curve flattens after the 30th iteration and increasing the number of iterations would not have an effect in the model. This implies that there are enough trees in the ensemble.
+
+# Benchmark the KNN, Random Forest and XGBoost model-building processes
+
+```{r, warning=FALSE, results='hide'}
+# Create a tuning wrapper for KNN
+kknnWrapper <- makeTuneWrapper(kknn_normalized, resampling = kFold, 
+                               par.set = kknnParamSpace, 
+                               control = gridSearch, 
+                               measures = list(rmse, rsq))
+
+# Create a tuning wrapper for RF
+forestWrapper <- makeTuneWrapper(rf_learner, resampling = kFold, 
+                                par.set = forestParamSpace, 
+                                control = randSearch, 
+                                measures = list(rmse, rsq))
+
+# Create a tuning wrapper for XGB
+xgbWrapper <- makeTuneWrapper(xgb, resampling = kFold, 
+                             par.set = xgbParamSpace, 
+                             control = randSearch, 
+                             measures = list(rmse, rsq))
+
+# Create a list of learners
+learners = list(kknnWrapper, forestWrapper, xgbWrapper)
+
+# Use holdout cross validation for the benchmarking process
+holdout <- makeResampleDesc("Holdout")
+ 
+# Benchmark
+bench <- benchmark(learners, reg_task, holdout, show.info = FALSE)
+
+```
+
+```{r}
+# View the benchmarking results
+bench
+```
+
+According to this benchmarking results, KNN is likely to give me the best-performing model, with a mean prediction error of 1.06
+
+
+# Model Validation
+
+I will use all the four models that I trained to make predictions on test data and assess how they would generalize on new, unseen data. I'll use RMSE as my performance metric.
+
+```{r}
+# Make predictions on test data using the Linear model
+lmPreds <- predict(Linear_model, newdata = test_data)$data
+# Make predictions using KNN model
+knnPreds <- predict(tunedKnnModel, newdata = test_data)$data
+# Make predictions using RF model
+rfPreds <- predict(tunedForestModel,newdata = test_data)$data
+# Make predictions using XGBoost model
+xgbPreds <- predict(tunedXgbModel, newdata = test_data)$data
+```
+
+```{r}
+# Calculate test RMSE for each and every model
+lm_RMSE <- mean((test_data$life_expectancy - lmPreds$response)^2) |> sqrt()
+lm_RMSE
+knn_RMSE <- mean((test_data$life_expectancy - knnPreds$response)^2) |> sqrt()
+knn_RMSE
+rf_RMSE <- mean((test_data$life_expectancy - rfPreds$response)^2) |> sqrt()
+rf_RMSE
+xgb_RMSE <- mean((test_data$life_expectancy - xgbPreds$response)^2) |> sqrt()
+xgb_RMSE
+```
+
+KNN outperforms all the other algorithms. A test RMSE of 0.638 is low and is good, even though not very closer to zero. On average, the KNN predictions are off by approximately 0.64 years. In other words, I would expect my predictions to be within (plus or minus) 0.64 years of true Life Expectancy.
+
