@@ -1,5 +1,5 @@
 # Life-Expectancy-Prediction-Using-Regression-Models
-This repository contains files for the analysis and predictive modeling of Life Expectancy in Africa using multiple regression techniques. The dataset includes various factors such as GDP per-capita, health expenditure, military expenditure, forest cover, CO2 emmissions, access to drinking water services, people practicing open defecation, adult obesity, access to internet, and more.
+This repository contains files for the analysis and predictive modeling of Life Expectancy in Africa, using multiple regression techniques. The dataset includes various factors such as GDP per-capita, health expenditure, military expenditure, forest cover, CO2 emmissions, access to drinking water services, people practicing open defecation, adult obesity, access to internet, and more.
 
 ## Models Used:
 * Linear Regression
